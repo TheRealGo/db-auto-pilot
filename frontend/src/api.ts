@@ -1,4 +1,5 @@
 import type {
+  AppSettings,
   DatasetDetail,
   DatasetSummary,
   ProposalResponse,
@@ -41,6 +42,18 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function listDatasets() {
   return api<DatasetSummary[]>("/datasets");
+}
+
+export function getAppSettings() {
+  return api<AppSettings>("/settings");
+}
+
+export function updateAppSettings(payload: AppSettings) {
+  return api<AppSettings>("/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 }
 
 export function getDataset(id: string) {

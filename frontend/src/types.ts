@@ -165,3 +165,9 @@ export type QueryHistoryEntry = {
   };
   created_at: string;
 };
+
+export type AppSettings = {
+  api_key: string | null;
+  endpoint: string | null;
+  model: string | null;
+};

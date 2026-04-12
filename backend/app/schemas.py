@@ -83,3 +83,15 @@ class QueryHistoryEntry(BaseModel):
     explanation: str
     result: dict[str, Any]
     created_at: datetime
+
+
+class AppSettingsRequest(BaseModel):
+    api_key: str | None = None
+    endpoint: str | None = None
+    model: str | None = None
+
+
+class AppSettingsResponse(BaseModel):
+    api_key: str | None = None
+    endpoint: str | None = None
+    model: str | None = None

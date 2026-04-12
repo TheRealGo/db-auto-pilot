@@ -9,9 +9,11 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.config import Settings, get_settings
+from app.config import AppSettingsPayload, Settings, get_settings, load_app_settings, save_app_settings
 from app.repository import MetadataRepository
 from app.schemas import (
+    AppSettingsRequest,
+    AppSettingsResponse,
     ApproveRequest,
     ApproveResponse,
     DatasetDetail,
@@ -60,6 +62,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/settings", response_model=AppSettingsResponse)
+    def get_app_settings() -> dict[str, Any]:
+        payload = load_app_settings(settings)
+        return payload.model_dump()
+
+    @app.put("/settings", response_model=AppSettingsResponse)
+    def update_app_settings(request: AppSettingsRequest) -> dict[str, Any]:
+        payload = AppSettingsPayload.model_validate(request.model_dump())
+        saved = save_app_settings(settings, payload)
+        return saved.model_dump()
 
     @app.get("/datasets", response_model=list[DatasetSummary])
     def list_datasets() -> list[dict[str, Any]]:

@@ -130,3 +130,35 @@ def test_query_count_fallback(monkeypatch, tmp_path: Path) -> None:
     payload = query.json()
     assert "COUNT" in payload["sql"]
     assert payload["rows"][0][0] == 3
+
+
+def test_app_settings_roundtrip(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("DB_AUTO_PILOT_DATA_DIR", str(tmp_path / "data"))
+    get_settings.cache_clear()
+    app = create_app(get_settings())
+    client = TestClient(app)
+
+    initial = client.get("/settings")
+    assert initial.status_code == 200
+    assert initial.json() == {"api_key": None, "endpoint": None, "model": None}
+
+    update = client.put(
+        "/settings",
+        json={
+            "api_key": "test-key",
+            "endpoint": "https://example.invalid/v1",
+            "model": "gpt-test",
+        },
+    )
+    assert update.status_code == 200
+    assert update.json() == {
+        "api_key": "test-key",
+        "endpoint": "https://example.invalid/v1",
+        "model": "gpt-test",
+    }
+
+    loaded = client.get("/settings")
+    assert loaded.status_code == 200
+    assert loaded.json()["api_key"] == "test-key"
+    assert loaded.json()["endpoint"] == "https://example.invalid/v1"
+    assert loaded.json()["model"] == "gpt-test"
