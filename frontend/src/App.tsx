@@ -2,14 +2,16 @@ import { useEffect, useState } from "react";
 import {
   approveProposal,
   generateProposal,
+  getAppSettings,
   getDataset,
   getQueryHistory,
   listDatasets,
   queryDataset,
   reviseProposal,
+  updateAppSettings,
   uploadDataset,
 } from "./api";
-import type { DatasetDetail, DatasetSummary, ProposalResponse, QueryHistoryEntry, QueryResponse } from "./types";
+import type { AppSettings, DatasetDetail, DatasetSummary, ProposalResponse, QueryHistoryEntry, QueryResponse } from "./types";
 
 function formatDate(value: string) {
   return new Date(value).toLocaleString("ja-JP");
@@ -25,6 +27,7 @@ export default function App() {
   const [question, setQuestion] = useState("");
   const [queryMode, setQueryMode] = useState<"raw" | "merged">("merged");
   const [queryResult, setQueryResult] = useState<QueryResponse | null>(null);
+  const [appSettings, setAppSettings] = useState<AppSettings>({ api_key: null, endpoint: null, model: null });
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,7 +45,12 @@ export default function App() {
 
   useEffect(() => {
     void refreshDatasets();
+    void loadSettings();
   }, []);
+
+  async function loadSettings() {
+    setAppSettings(await getAppSettings());
+  }
 
   async function selectDataset(id: string) {
     setSelectedId(id);
@@ -103,6 +111,13 @@ export default function App() {
       const result = await queryDataset(selectedId, queryMode, question);
       setQueryResult(result);
       setHistory(await getQueryHistory(selectedId));
+    });
+  }
+
+  async function handleSaveSettings() {
+    await withTask("Saving settings", async () => {
+      const saved = await updateAppSettings(appSettings);
+      setAppSettings(saved);
     });
   }
 
@@ -180,6 +195,50 @@ export default function App() {
                 onClick={() => void handleUpload()}
               >
                 Create Dataset
+              </button>
+            </section>
+
+            <section className="rounded-[28px] border border-white/10 bg-slate-900/80 p-5 shadow-panel">
+              <h2 className="text-lg font-semibold">LLM Settings</h2>
+              <p className="mt-2 text-sm text-slate-400">OpenAI 互換 API の接続先をここで保存します。保存後の proposal と query から反映されます。</p>
+              <div className="mt-4 space-y-3">
+                <div>
+                  <label className="text-xs uppercase tracking-[0.2em] text-slate-500">API Key</label>
+                  <input
+                    className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-orange-300/40"
+                    type="password"
+                    placeholder="sk-..."
+                    value={appSettings.api_key ?? ""}
+                    onChange={(event) => setAppSettings((current) => ({ ...current, api_key: event.target.value || null }))}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs uppercase tracking-[0.2em] text-slate-500">Endpoint</label>
+                  <input
+                    className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-orange-300/40"
+                    type="text"
+                    placeholder="https://api.openai.com/v1"
+                    value={appSettings.endpoint ?? ""}
+                    onChange={(event) => setAppSettings((current) => ({ ...current, endpoint: event.target.value || null }))}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs uppercase tracking-[0.2em] text-slate-500">Model</label>
+                  <input
+                    className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-orange-300/40"
+                    type="text"
+                    placeholder="gpt-4.1-mini"
+                    value={appSettings.model ?? ""}
+                    onChange={(event) => setAppSettings((current) => ({ ...current, model: event.target.value || null }))}
+                  />
+                </div>
+              </div>
+              <button
+                className="mt-4 w-full rounded-2xl border border-sky-300/30 bg-sky-400/10 px-4 py-3 text-sm font-medium text-sky-100 transition hover:bg-sky-400/20 disabled:opacity-40"
+                disabled={Boolean(busy)}
+                onClick={() => void handleSaveSettings()}
+              >
+                Save LLM Settings
               </button>
             </section>
           </aside>

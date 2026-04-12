@@ -5,7 +5,7 @@ import re
 import sqlite3
 from typing import Any
 
-from app.config import Settings
+from app.config import Settings, effective_openai_settings
 
 try:
     from openai import OpenAI
@@ -88,9 +88,13 @@ def heuristic_sql(question: str, tables: list[dict[str, Any]]) -> tuple[str, str
 
 
 def openai_sql(settings: Settings, question: str, tables: list[dict[str, Any]]) -> tuple[str, str] | None:
-    if not settings.openai_api_key or OpenAI is None:
+    openai_settings = effective_openai_settings(settings)
+    if not openai_settings.api_key or OpenAI is None:
         return None
-    client = OpenAI(api_key=settings.openai_api_key)
+    client_options: dict[str, Any] = {"api_key": openai_settings.api_key}
+    if openai_settings.endpoint:
+        client_options["base_url"] = openai_settings.endpoint
+    client = OpenAI(**client_options)
     prompt = {
         "question": question,
         "tables": schema_prompt(tables),
@@ -103,7 +107,7 @@ def openai_sql(settings: Settings, question: str, tables: list[dict[str, Any]]) 
     }
     try:
         response = client.responses.create(
-            model=settings.openai_model,
+            model=openai_settings.model,
             input=[
                 {
                     "role": "system",

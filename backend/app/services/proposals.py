@@ -7,7 +7,7 @@ from collections import Counter, defaultdict, deque
 from difflib import SequenceMatcher
 from typing import Any
 
-from app.config import Settings
+from app.config import Settings, effective_openai_settings
 
 try:
     from openai import OpenAI
@@ -432,12 +432,16 @@ def _openai_json_response(
     system_prompt: str,
     user_payload: dict[str, Any],
 ) -> dict[str, Any] | None:
-    if not settings.openai_api_key or OpenAI is None:
+    openai_settings = effective_openai_settings(settings)
+    if not openai_settings.api_key or OpenAI is None:
         return None
-    client = OpenAI(api_key=settings.openai_api_key)
+    client_options: dict[str, Any] = {"api_key": openai_settings.api_key}
+    if openai_settings.endpoint:
+        client_options["base_url"] = openai_settings.endpoint
+    client = OpenAI(**client_options)
     try:
         response = client.responses.create(
-            model=settings.openai_model,
+            model=openai_settings.model,
             input=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
