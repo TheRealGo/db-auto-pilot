@@ -3,10 +3,12 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
+import pandas as pd
 from fastapi.testclient import TestClient
 
 from app.config import get_settings
 from app.main import create_app
+from app.services.proposals import make_json_safe
 
 
 def test_dataset_flow(monkeypatch, tmp_path: Path) -> None:
@@ -162,3 +164,16 @@ def test_app_settings_roundtrip(monkeypatch, tmp_path: Path) -> None:
     assert loaded.json()["api_key"] == "test-key"
     assert loaded.json()["endpoint"] == "https://example.invalid/v1"
     assert loaded.json()["model"] == "gpt-test"
+
+
+def test_make_json_safe_handles_timestamps() -> None:
+    payload = {
+        "timestamp": pd.Timestamp("2024-01-02T03:04:05"),
+        "items": [pd.Timestamp("2024-05-06"), {"nested": pd.Timestamp("2024-07-08")}],
+    }
+
+    converted = make_json_safe(payload)
+
+    assert converted["timestamp"] == "2024-01-02T03:04:05"
+    assert converted["items"][0] == "2024-05-06T00:00:00"
+    assert converted["items"][1]["nested"] == "2024-07-08T00:00:00"
