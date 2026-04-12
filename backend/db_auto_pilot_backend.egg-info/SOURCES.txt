@@ -1,0 +1,13 @@
+pyproject.toml
+app/__init__.py
+app/config.py
+app/desktop.py
+app/main.py
+app/repository.py
+app/schemas.py
+db_auto_pilot_backend.egg-info/PKG-INFO
+db_auto_pilot_backend.egg-info/SOURCES.txt
+db_auto_pilot_backend.egg-info/dependency_links.txt
+db_auto_pilot_backend.egg-info/requires.txt
+db_auto_pilot_backend.egg-info/top_level.txt
+tests/test_api.py
