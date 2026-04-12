@@ -177,3 +177,33 @@ def test_make_json_safe_handles_timestamps() -> None:
     assert converted["timestamp"] == "2024-01-02T03:04:05"
     assert converted["items"][0] == "2024-05-06T00:00:00"
     assert converted["items"][1]["nested"] == "2024-07-08T00:00:00"
+
+
+def test_generate_proposal_accepts_excel_datetime_columns(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("DB_AUTO_PILOT_DATA_DIR", str(tmp_path / "data"))
+    get_settings.cache_clear()
+    app = create_app(get_settings())
+    client = TestClient(app)
+
+    dataframe = pd.DataFrame(
+        {
+            "event_date": [pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")],
+            "amount": [100, 150],
+        }
+    )
+    workbook = io.BytesIO()
+    with pd.ExcelWriter(workbook, engine="openpyxl") as writer:
+        dataframe.to_excel(writer, index=False, sheet_name="Sheet1")
+    workbook.seek(0)
+
+    create = client.post(
+        "/datasets",
+        files=[("files", ("dated.xlsx", workbook, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))],
+    )
+    assert create.status_code == 200
+    dataset_id = create.json()["dataset"]["id"]
+
+    proposal = client.post(f"/datasets/{dataset_id}/proposal")
+    assert proposal.status_code == 200
+    payload = proposal.json()
+    assert payload["proposal"]["raw_tables"][0]["columns"][0]["logical_type"] == "datetime"

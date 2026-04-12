@@ -4,13 +4,35 @@ import json
 import sqlite3
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def json_compatible(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): json_compatible(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [json_compatible(item) for item in value]
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()
+        except Exception:
+            pass
+    if hasattr(value, "item"):
+        try:
+            return json_compatible(value.item())
+        except Exception:
+            pass
+    return str(value)
 
 
 class MetadataRepository:
@@ -225,7 +247,7 @@ class MetadataRepository:
                 "version": version,
                 "status": status,
                 "feedback": feedback,
-                "proposal_json": json.dumps(proposal, ensure_ascii=False),
+                "proposal_json": json.dumps(json_compatible(proposal), ensure_ascii=False),
                 "created_at": utc_now(),
             }
             conn.execute(
