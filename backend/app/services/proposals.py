@@ -3,9 +3,12 @@ from __future__ import annotations
 import copy
 import json
 import re
+from datetime import date, datetime
 from collections import Counter, defaultdict, deque
 from difflib import SequenceMatcher
 from typing import Any
+
+import pandas as pd
 
 from app.config import Settings, effective_openai_settings
 
@@ -427,6 +430,23 @@ def revise_proposal(existing_proposal: dict[str, Any], feedback: str) -> dict[st
     return apply_feedback_heuristics(proposal, feedback)
 
 
+def make_json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (pd.Timestamp, datetime, date)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): make_json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [make_json_safe(item) for item in value]
+    if hasattr(value, "item"):
+        try:
+            return make_json_safe(value.item())
+        except Exception:
+            return str(value)
+    return str(value)
+
+
 def _openai_json_response(
     settings: Settings,
     system_prompt: str,
@@ -439,12 +459,13 @@ def _openai_json_response(
     if openai_settings.endpoint:
         client_options["base_url"] = openai_settings.endpoint
     client = OpenAI(**client_options)
+    safe_payload = make_json_safe(user_payload)
     try:
         response = client.responses.create(
             model=openai_settings.model,
             input=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+                {"role": "user", "content": json.dumps(safe_payload, ensure_ascii=False)},
             ],
         )
     except OpenAIError:
