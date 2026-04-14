@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import warnings
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,22 @@ def infer_logical_type(series: pd.Series) -> str:
         return "number"
     if pd.api.types.is_datetime64_any_dtype(series):
         return "datetime"
+    non_null = series.dropna()
+    if non_null.empty:
+        return "text"
+    as_text = non_null.astype(str).str.strip()
+    lowered = as_text.str.lower()
+    boolean_ratio = lowered.isin({"true", "false", "yes", "no", "y", "n", "0", "1"}).mean()
+    numeric_ratio = pd.to_numeric(as_text, errors="coerce").notna().mean()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        datetime_ratio = pd.to_datetime(as_text, errors="coerce").notna().mean()
+    if boolean_ratio >= 0.9:
+        return "boolean"
+    if numeric_ratio >= 0.95:
+        return "integer" if as_text.str.fullmatch(r"[+-]?\d+").fillna(False).mean() >= 0.95 else "number"
+    if datetime_ratio >= 0.8:
+        return "datetime"
     return "text"
 
 
@@ -79,6 +96,47 @@ def sanitize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     return cleaned
 
 
+def series_profile(series: pd.Series) -> dict[str, Any]:
+    non_null = series.dropna()
+    as_text = non_null.astype(str).str.strip() if not non_null.empty else pd.Series(dtype=str)
+    lowered = as_text.str.lower() if not as_text.empty else pd.Series(dtype=str)
+    numeric_ratio = round(float(pd.to_numeric(as_text, errors="coerce").notna().mean()), 3) if not as_text.empty else 0.0
+    if not as_text.empty:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            datetime_ratio = round(float(pd.to_datetime(as_text, errors="coerce").notna().mean()), 3)
+    else:
+        datetime_ratio = 0.0
+    boolean_ratio = (
+        round(float(lowered.isin({"true", "false", "yes", "no", "y", "n", "0", "1"}).mean()), 3)
+        if not lowered.empty
+        else 0.0
+    )
+    value_lengths = as_text.str.len() if not as_text.empty else pd.Series(dtype="int64")
+    normalized_samples = list(dict.fromkeys(as_text.head(5).tolist()))
+    category_samples = (
+        as_text.value_counts(dropna=True).head(5).index.tolist()
+        if not as_text.empty and as_text.nunique() <= max(20, len(as_text) // 2 or 1)
+        else []
+    )
+    return {
+        "non_null_count": int(len(non_null)),
+        "unique_count": int(non_null.astype(str).nunique()) if not non_null.empty else 0,
+        "sample_values": [value for value in series.head(3).tolist() if value is not None],
+        "normalized_samples": normalized_samples,
+        "category_samples": category_samples,
+        "null_ratio": null_ratio(series),
+        "distinct_ratio": distinct_ratio(series),
+        "numeric_ratio": numeric_ratio,
+        "datetime_ratio": datetime_ratio,
+        "boolean_ratio": boolean_ratio,
+        "value_lengths": {
+            "min": int(value_lengths.min()) if not value_lengths.empty else 0,
+            "max": int(value_lengths.max()) if not value_lengths.empty else 0,
+        },
+    }
+
+
 def read_tabular_file(path: Path) -> list[tuple[str, pd.DataFrame]]:
     if path.suffix.lower() == ".csv":
         return [("sheet1", sanitize_dataframe(pd.read_csv(path)))]
@@ -109,16 +167,17 @@ def file_profile(dataset_id: str, file_record: dict[str, Any]) -> list[dict[str,
         normalized_names = normalize_column_names([str(column) for column in df.columns])
         for column, normalized_name in zip(df.columns, normalized_names, strict=True):
             series = df[column]
-            sample_values = [value for value in series.head(3).tolist() if value is not None]
+            profile = series_profile(series)
             columns.append(
                 {
                     "original_name": str(column),
                     "normalized_name": normalized_name,
                     "db_name": normalized_name,
                     "logical_type": infer_logical_type(series),
-                    "sample_values": sample_values,
-                    "null_ratio": null_ratio(series),
-                    "distinct_ratio": distinct_ratio(series),
+                    "sample_values": profile["sample_values"],
+                    "null_ratio": profile["null_ratio"],
+                    "distinct_ratio": profile["distinct_ratio"],
+                    "profile": profile,
                     "normalized_candidates": normalized_candidates(str(column)),
                 }
             )

@@ -47,3 +47,8 @@ Pull requests should include:
 
 ## Configuration & Security
 Do not commit sample spreadsheets with sensitive data, API keys, or database credentials. Keep environment-specific settings in ignored local config files, and document required variables in `README.md`.
+
+## Codex Workflow Rule
+When Codex changes implementation files or scripts, it must also review and update `Spec.md` before finishing the task if the change affects behavior, workflow, scope, limitations, or implementation status described there.
+
+Codex must treat the `Spec.md` update as part of the same task, not as an optional follow-up. In the final response, Codex should explicitly mention whether `Spec.md` was updated, or state that no `Spec.md` change was needed and why.

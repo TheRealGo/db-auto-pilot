@@ -50,16 +50,39 @@ class ApproveRequest(BaseModel):
 class ApproveResponse(BaseModel):
     dataset_id: str
     approved_proposal_id: str
-    created_tables: list[dict[str, str]]
+    created_tables: list[dict[str, str]] = []
+
+
+class MaterializationProposalRequest(BaseModel):
+    proposal_id: str | None = None
+
+
+class MaterializationProposalResponse(BaseModel):
+    id: str
+    dataset_id: str
+    proposal_id: str
+    version: int
+    status: str
+    source_run_id: str | None = None
+    materialization: dict[str, Any]
+    created_at: datetime
+
+
+class MaterializationProposalApproveRequest(BaseModel):
+    approved_materialization_proposal_id: str
 
 
 class DatasetDetail(BaseModel):
     dataset: DatasetSummary
     source_files: list[SourceFileInfo]
     latest_proposal: ProposalResponse | None = None
+    proposals: list[ProposalResponse] = []
+    latest_materialization_proposal: MaterializationProposalResponse | None = None
     tables: list[dict[str, Any]]
     approval_decisions: list[dict[str, Any]] = []
     column_lineage: list[dict[str, Any]] = []
+    materialization_proposals: list[dict[str, Any]] = []
+    materialization_runs: list[dict[str, Any]] = []
 
 
 class QueryRequest(BaseModel):
