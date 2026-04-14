@@ -470,9 +470,9 @@ def _openai_json_response(
         raise ProposalGenerationError(f"OpenAI client initialization failed: {exc}") from exc
     safe_payload = make_json_safe(user_payload)
     try:
-        response = client.responses.create(
+        response = client.chat.completions.create(
             model=openai_settings.model,
-            input=[
+            messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": json.dumps(safe_payload, ensure_ascii=False)},
             ],
@@ -481,7 +481,8 @@ def _openai_json_response(
         raise ProposalGenerationError(f"OpenAI proposal generation failed: {exc}") from exc
     except Exception as exc:  # pragma: no cover
         raise ProposalGenerationError(f"Unexpected OpenAI proposal error: {exc}") from exc
-    text = getattr(response, "output_text", "").strip()
+    message = response.choices[0].message if response.choices else None
+    text = (message.content or "").strip() if message else ""
     if not text:
         raise ProposalGenerationError("OpenAI returned an empty proposal response.")
     try:
