@@ -35,7 +35,7 @@ from app.services.ingestion import (
     slugify,
 )
 from app.services.proposals import generate_proposal, revise_proposal as revise_proposal_payload
-from app.services.querying import heuristic_sql, openai_sql, run_query, validate_select_sql
+from app.services.querying import QueryGenerationError, generate_query, run_query, validate_select_sql
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -294,8 +294,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         tables = repository.list_dataset_tables(dataset_id, request.target_mode)
         if not tables:
             raise HTTPException(status_code=400, detail=f"No {request.target_mode} tables available.")
-        generated = openai_sql(settings, request.question, tables) or heuristic_sql(request.question, tables)
-        sql, explanation = generated
+        try:
+            generated = generate_query(settings, request.question, tables)
+        except QueryGenerationError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        sql = generated["sql"]
+        explanation = generated["explanation"]
         try:
             sql = validate_select_sql(sql)
         except ValueError as exc:
@@ -313,7 +317,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             explanation,
             {"columns": columns, "rows": rows},
         )
-        return {"sql": sql, "explanation": explanation, "columns": columns, "rows": rows}
+        return {
+            "sql": sql,
+            "explanation": explanation,
+            "generator": generated["generator"],
+            "warning": generated["warning"],
+            "columns": columns,
+            "rows": rows,
+        }
 
     @app.get("/datasets/{dataset_id}/query-history", response_model=list[QueryHistoryEntry])
     def get_query_history(dataset_id: str) -> list[dict[str, Any]]:

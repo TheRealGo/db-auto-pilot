@@ -464,12 +464,22 @@ export default function App() {
                     {queryResult ? (
                       <div className="mt-6 space-y-4">
                         <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
-                          <div className="text-sm font-medium text-white">Generated SQL</div>
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-sm font-medium text-white">Generated SQL</div>
+                            <div className="rounded-full border border-white/10 px-3 py-1 text-[11px] text-slate-300">
+                              {queryResult.generator}
+                            </div>
+                          </div>
                           <pre className="mt-3 overflow-x-auto text-xs text-sky-200">{queryResult.sql}</pre>
                         </div>
                         <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4 text-sm text-slate-300">
                           {queryResult.explanation}
                         </div>
+                        {queryResult.warning ? (
+                          <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+                            {queryResult.warning}
+                          </div>
+                        ) : null}
                         <div className="overflow-hidden rounded-2xl border border-white/10">
                           <div className="overflow-x-auto">
                             <table className="min-w-full divide-y divide-white/10 text-sm">
