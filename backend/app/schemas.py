@@ -70,6 +70,8 @@ class QueryRequest(BaseModel):
 class QueryResponse(BaseModel):
     sql: str
     explanation: str
+    generator: str
+    warning: str | None = None
     columns: list[str]
     rows: list[list[Any]]
 

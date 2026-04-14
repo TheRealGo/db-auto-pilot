@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 from fastapi.testclient import TestClient
 
+import app.main as main_module
 from app.config import get_settings
 from app.main import create_app
 from app.services.proposals import make_json_safe
@@ -45,6 +46,17 @@ def test_dataset_flow(monkeypatch, tmp_path: Path) -> None:
     assert approval.status_code == 200
     assert len(approval.json()["created_tables"]) >= 2
 
+    monkeypatch.setattr(
+        main_module,
+        "generate_query",
+        lambda settings, question, tables: {
+            "sql": f'SELECT * FROM "{tables[0]["table_name"]}" LIMIT 10',
+            "explanation": "stubbed llm query",
+            "generator": "openai",
+            "warning": None,
+        },
+    )
+
     query = client.post(
         f"/datasets/{dataset_id}/query",
         json={"target_mode": "raw", "question": "すべて見せて"},
@@ -54,6 +66,7 @@ def test_dataset_flow(monkeypatch, tmp_path: Path) -> None:
     assert payload["columns"]
     assert payload["rows"]
     assert "LIMIT" in payload["sql"]
+    assert payload["generator"] == "openai"
 
     detail = client.get(f"/datasets/{dataset_id}")
     assert detail.status_code == 200
@@ -108,8 +121,11 @@ def test_revision_persists_user_decision(monkeypatch, tmp_path: Path) -> None:
     assert any(decision["decision"] == "keep_separate" for decision in decisions)
 
 
-def test_query_count_fallback(monkeypatch, tmp_path: Path) -> None:
+def test_query_requires_llm(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("DB_AUTO_PILOT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_ENDPOINT", raising=False)
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
     get_settings.cache_clear()
     app = create_app(get_settings())
     client = TestClient(app)
@@ -128,10 +144,8 @@ def test_query_count_fallback(monkeypatch, tmp_path: Path) -> None:
         f"/datasets/{dataset_id}/query",
         json={"target_mode": "raw", "question": "件数を教えて"},
     )
-    assert query.status_code == 200
-    payload = query.json()
-    assert "COUNT" in payload["sql"]
-    assert payload["rows"][0][0] == 3
+    assert query.status_code == 502
+    assert query.json()["detail"] == "OpenAI API key is not configured."
 
 
 def test_app_settings_roundtrip(monkeypatch, tmp_path: Path) -> None:

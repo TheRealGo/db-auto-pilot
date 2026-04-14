@@ -149,6 +149,8 @@ export type DatasetDetail = {
 export type QueryResponse = {
   sql: string;
   explanation: string;
+  generator: string;
+  warning?: string | null;
   columns: string[];
   rows: Array<Array<string | number | null>>;
 };

@@ -18,6 +18,10 @@ except ImportError:  # pragma: no cover
 FORBIDDEN_SQL = {"insert", "update", "delete", "drop", "alter", "create", "attach", "pragma"}
 
 
+class QueryGenerationError(RuntimeError):
+    pass
+
+
 def validate_select_sql(sql: str) -> str:
     normalized = sql.strip().rstrip(";")
     lowered = normalized.lower()
@@ -35,66 +39,31 @@ def validate_select_sql(sql: str) -> str:
 
 
 def schema_prompt(tables: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    payload = []
-    for table in tables:
-        payload.append(
-            {
-                "table_name": table["table_name"],
-                "display_name": table["display_name"],
-                "columns": table["schema"]["columns"],
-            }
-        )
-    return payload
+    return [
+        {
+            "table_name": table["table_name"],
+            "display_name": table["display_name"],
+            "columns": table["schema"]["columns"],
+        }
+        for table in tables
+    ]
 
 
-def heuristic_sql(question: str, tables: list[dict[str, Any]]) -> tuple[str, str]:
-    if not tables:
-        raise ValueError("No approved tables available for querying.")
-    table_name = tables[0]["table_name"]
-    columns = tables[0]["schema"]["columns"]
-    numeric_columns = [column["name"] for column in columns if column["logical_type"] in {"integer", "number"}]
-    text_columns = [column["name"] for column in columns if column["logical_type"] == "text"]
-    lowered = question.lower()
-    table_label = tables[0]["display_name"]
-    if "件数" in question or "count" in lowered:
-        return (
-            f'SELECT COUNT(*) AS row_count FROM "{table_name}"',
-            f"`{table_label}` の件数を集計しました。",
-        )
-    if ("上位" in question or "top" in lowered) and numeric_columns:
-        measure = numeric_columns[0]
-        limit_match = re.search(r"(\d+)", question)
-        limit = limit_match.group(1) if limit_match else "10"
-        return (
-            f'SELECT * FROM "{table_name}" ORDER BY "{measure}" DESC LIMIT {limit}',
-            f"`{table_label}` を `{measure}` の降順で上位 {limit} 件表示しました。",
-        )
-    if "合計" in question and numeric_columns:
-        measure = numeric_columns[0]
-        if "別" in question and text_columns:
-            dimension = text_columns[0]
-            return (
-                f'SELECT "{dimension}", SUM("{measure}") AS total_{measure} FROM "{table_name}" GROUP BY "{dimension}" ORDER BY total_{measure} DESC',
-                f"`{table_label}` から `{dimension}` ごとに `{measure}` を合計しました。",
-            )
-        return (
-            f'SELECT SUM("{measure}") AS total_{measure} FROM "{table_name}"',
-            f"`{table_label}` から `{measure}` の合計を計算しました。",
-        )
-    return (
-        f'SELECT * FROM "{table_name}" LIMIT 100',
-        f"`{table_label}` の先頭100件を表示しています。OpenAI API を設定すると自然言語の意図に沿った SQL 生成が有効になります。",
-    )
-
-
-def openai_sql(settings: Settings, question: str, tables: list[dict[str, Any]]) -> tuple[str, str] | None:
+def openai_sql(settings: Settings, question: str, tables: list[dict[str, Any]]) -> tuple[str, str]:
     openai_settings = effective_openai_settings(settings)
-    if not openai_settings.api_key or OpenAI is None:
-        return None
+    if not openai_settings.api_key:
+        raise QueryGenerationError("OpenAI API key is not configured.")
+    if OpenAI is None:
+        raise QueryGenerationError("OpenAI SDK is not installed.")
+
     client_options: dict[str, Any] = {"api_key": openai_settings.api_key}
     if openai_settings.endpoint:
         client_options["base_url"] = openai_settings.endpoint
-    client = OpenAI(**client_options)
+    try:
+        client = OpenAI(**client_options)
+    except Exception as exc:  # pragma: no cover
+        raise QueryGenerationError(f"OpenAI client initialization failed: {exc}") from exc
+
     prompt = {
         "question": question,
         "tables": schema_prompt(tables),
@@ -119,20 +88,35 @@ def openai_sql(settings: Settings, question: str, tables: list[dict[str, Any]]) 
                 {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
             ],
         )
-    except OpenAIError:
-        return None
+    except OpenAIError as exc:
+        raise QueryGenerationError(f"OpenAI query generation failed: {exc}") from exc
+    except Exception as exc:  # pragma: no cover
+        raise QueryGenerationError(f"Unexpected OpenAI query error: {exc}") from exc
+
     text = getattr(response, "output_text", "").strip()
     if not text:
-        return None
+        raise QueryGenerationError("OpenAI returned an empty response.")
     try:
         payload = json.loads(text)
     except json.JSONDecodeError:
         start = text.find("{")
         end = text.rfind("}")
         if start < 0 or end <= start:
-            return None
+            raise QueryGenerationError("OpenAI response was not valid JSON.")
         payload = json.loads(text[start : end + 1])
+    if "sql" not in payload or "explanation" not in payload:
+        raise QueryGenerationError("OpenAI response did not include sql/explanation.")
     return payload["sql"], payload["explanation"]
+
+
+def generate_query(settings: Settings, question: str, tables: list[dict[str, Any]]) -> dict[str, Any]:
+    sql, explanation = openai_sql(settings, question, tables)
+    return {
+        "sql": sql,
+        "explanation": explanation,
+        "generator": "openai",
+        "warning": None,
+    }
 
 
 def run_query(conn: sqlite3.Connection, sql: str) -> tuple[list[str], list[list[Any]]]:
