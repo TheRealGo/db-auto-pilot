@@ -130,6 +130,29 @@ class MetadataRepository:
                     created_at TEXT NOT NULL,
                     FOREIGN KEY(dataset_id) REFERENCES datasets(id) ON DELETE CASCADE
                 );
+
+                CREATE TABLE IF NOT EXISTS materialization_runs (
+                    id TEXT PRIMARY KEY,
+                    dataset_id TEXT NOT NULL,
+                    proposal_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    generated_code TEXT NOT NULL,
+                    result_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(dataset_id) REFERENCES datasets(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS materialization_proposals (
+                    id TEXT PRIMARY KEY,
+                    dataset_id TEXT NOT NULL,
+                    proposal_id TEXT NOT NULL,
+                    version INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    source_run_id TEXT,
+                    materialization_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(dataset_id) REFERENCES datasets(id) ON DELETE CASCADE
+                );
                 """
             )
 
@@ -282,6 +305,18 @@ class MetadataRepository:
             ).fetchone()
         return self.deserialize_proposal(dict(row)) if row else None
 
+    def list_proposals(self, dataset_id: str) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM proposals
+                WHERE dataset_id = ?
+                ORDER BY version DESC
+                """,
+                (dataset_id,),
+            ).fetchall()
+        return [self.deserialize_proposal(dict(row)) for row in rows]
+
     def replace_dataset_tables(self, dataset_id: str, tables: list[dict[str, Any]]) -> None:
         with self.connect() as conn:
             conn.execute("DELETE FROM dataset_tables WHERE dataset_id = ?", (dataset_id,))
@@ -386,6 +421,143 @@ class MetadataRepository:
             item = dict(row)
             item["schema"] = json.loads(item.pop("schema_json"))
             output.append(item)
+        return output
+
+    def create_materialization_proposal(
+        self,
+        dataset_id: str,
+        proposal_id: str,
+        materialization: dict[str, Any],
+        status: str = "proposed",
+        source_run_id: str | None = None,
+    ) -> dict[str, Any]:
+        with self.connect() as conn:
+            version = (
+                conn.execute(
+                    "SELECT COALESCE(MAX(version), 0) + 1 FROM materialization_proposals WHERE dataset_id = ?",
+                    (dataset_id,),
+                ).fetchone()[0]
+            )
+            row = {
+                "id": str(uuid.uuid4()),
+                "dataset_id": dataset_id,
+                "proposal_id": proposal_id,
+                "version": version,
+                "status": status,
+                "source_run_id": source_run_id,
+                "materialization_json": json.dumps(json_compatible(materialization), ensure_ascii=False),
+                "created_at": utc_now(),
+            }
+            conn.execute(
+                """
+                INSERT INTO materialization_proposals(
+                    id, dataset_id, proposal_id, version, status, source_run_id, materialization_json, created_at
+                )
+                VALUES(:id, :dataset_id, :proposal_id, :version, :status, :source_run_id, :materialization_json, :created_at)
+                """,
+                row,
+            )
+        return self.deserialize_materialization_proposal(row)
+
+    def deserialize_materialization_proposal(self, row: dict[str, Any]) -> dict[str, Any]:
+        item = dict(row)
+        item["materialization"] = json.loads(item.pop("materialization_json"))
+        return item
+
+    def get_materialization_proposal(self, materialization_proposal_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM materialization_proposals WHERE id = ?",
+                (materialization_proposal_id,),
+            ).fetchone()
+        return self.deserialize_materialization_proposal(dict(row)) if row else None
+
+    def get_latest_materialization_proposal(self, dataset_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM materialization_proposals
+                WHERE dataset_id = ?
+                ORDER BY version DESC
+                LIMIT 1
+                """,
+                (dataset_id,),
+            ).fetchone()
+        return self.deserialize_materialization_proposal(dict(row)) if row else None
+
+    def list_materialization_proposals(self, dataset_id: str) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM materialization_proposals
+                WHERE dataset_id = ?
+                ORDER BY version DESC
+                """,
+                (dataset_id,),
+            ).fetchall()
+        return [self.deserialize_materialization_proposal(dict(row)) for row in rows]
+
+    def create_materialization_run(
+        self,
+        dataset_id: str,
+        proposal_id: str,
+        status: str,
+        generated_code: str,
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        row = {
+            "id": str(uuid.uuid4()),
+            "dataset_id": dataset_id,
+            "proposal_id": proposal_id,
+            "status": status,
+            "generated_code": generated_code,
+            "result_json": json.dumps(json_compatible(result), ensure_ascii=False),
+            "created_at": utc_now(),
+        }
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO materialization_runs(
+                    id, dataset_id, proposal_id, status, generated_code, result_json, created_at
+                )
+                VALUES(:id, :dataset_id, :proposal_id, :status, :generated_code, :result_json, :created_at)
+                """,
+                row,
+            )
+        return {
+            "id": row["id"],
+            "dataset_id": dataset_id,
+            "proposal_id": proposal_id,
+            "status": status,
+            "generated_code": generated_code,
+            "result": json.loads(row["result_json"]),
+            "created_at": row["created_at"],
+        }
+
+    def list_materialization_runs(self, dataset_id: str) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM materialization_runs
+                WHERE dataset_id = ?
+                ORDER BY datetime(created_at) DESC
+                """,
+                (dataset_id,),
+            ).fetchall()
+        output = []
+        for row in rows:
+            item = dict(row)
+            output.append(
+                {
+                    "id": item["id"],
+                    "dataset_id": item["dataset_id"],
+                    "proposal_id": item["proposal_id"],
+                    "status": item["status"],
+                    "generated_code": item["generated_code"],
+                    "result": json.loads(item["result_json"]),
+                    "created_at": item["created_at"],
+                }
+            )
         return output
 
     def clear_query_history(self, dataset_id: str) -> None:

@@ -2,6 +2,7 @@ import type {
   AppSettings,
   DatasetDetail,
   DatasetSummary,
+  MaterializationProposalResponse,
   ProposalResponse,
   QueryHistoryEntry,
   QueryResponse,
@@ -84,10 +85,35 @@ export function reviseProposal(datasetId: string, feedback: string) {
 }
 
 export function approveProposal(datasetId: string, proposalId: string) {
-  return api<{ dataset_id: string }>(`/datasets/${datasetId}/approve`, {
+  return api<{ dataset_id: string; approved_proposal_id: string; created_tables: Array<{ mode: string; table_name: string }> }>(`/datasets/${datasetId}/approve`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ approved_proposal_id: proposalId }),
+  });
+}
+
+export function generateMaterializationProposal(datasetId: string, proposalId?: string) {
+  return api<MaterializationProposalResponse>(`/datasets/${datasetId}/materialization-proposal`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ proposal_id: proposalId ?? null }),
+  });
+}
+
+export function approveMaterializationProposal(datasetId: string, materializationProposalId: string) {
+  return api<{ dataset_id: string; approved_proposal_id: string; created_tables: Array<{ mode: string; table_name: string }> }>(
+    `/datasets/${datasetId}/materialization-proposal/${materializationProposalId}/approve`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ approved_materialization_proposal_id: materializationProposalId }),
+    },
+  );
+}
+
+export function retryMaterializationProposal(datasetId: string, materializationProposalId: string) {
+  return api<MaterializationProposalResponse>(`/datasets/${datasetId}/materialization-proposal/${materializationProposalId}/retry`, {
+    method: "POST",
   });
 }
 
