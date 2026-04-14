@@ -20,6 +20,10 @@ except ImportError:  # pragma: no cover
     OpenAIError = Exception
 
 
+class ProposalGenerationError(RuntimeError):
+    pass
+
+
 SYNONYM_GROUPS = (
     {"customer", "client", "account", "顧客", "得意先", "取引先"},
     {"name", "title", "名称", "名前", "氏名"},
@@ -451,14 +455,19 @@ def _openai_json_response(
     settings: Settings,
     system_prompt: str,
     user_payload: dict[str, Any],
-) -> dict[str, Any] | None:
+) -> dict[str, Any]:
     openai_settings = effective_openai_settings(settings)
-    if not openai_settings.api_key or OpenAI is None:
-        return None
+    if not openai_settings.api_key:
+        raise ProposalGenerationError("OpenAI API key is not configured.")
+    if OpenAI is None:
+        raise ProposalGenerationError("OpenAI SDK is not installed.")
     client_options: dict[str, Any] = {"api_key": openai_settings.api_key}
     if openai_settings.endpoint:
         client_options["base_url"] = openai_settings.endpoint
-    client = OpenAI(**client_options)
+    try:
+        client = OpenAI(**client_options)
+    except Exception as exc:  # pragma: no cover
+        raise ProposalGenerationError(f"OpenAI client initialization failed: {exc}") from exc
     safe_payload = make_json_safe(user_payload)
     try:
         response = client.responses.create(
@@ -468,11 +477,13 @@ def _openai_json_response(
                 {"role": "user", "content": json.dumps(safe_payload, ensure_ascii=False)},
             ],
         )
-    except OpenAIError:
-        return None
+    except OpenAIError as exc:
+        raise ProposalGenerationError(f"OpenAI proposal generation failed: {exc}") from exc
+    except Exception as exc:  # pragma: no cover
+        raise ProposalGenerationError(f"Unexpected OpenAI proposal error: {exc}") from exc
     text = getattr(response, "output_text", "").strip()
     if not text:
-        return None
+        raise ProposalGenerationError("OpenAI returned an empty proposal response.")
     try:
         return json.loads(text)
     except json.JSONDecodeError:
@@ -480,7 +491,7 @@ def _openai_json_response(
         end = text.rfind("}")
         if start >= 0 and end > start:
             return json.loads(text[start : end + 1])
-    return None
+    raise ProposalGenerationError("OpenAI proposal response was not valid JSON.")
 
 
 def generate_proposal(
@@ -489,7 +500,6 @@ def generate_proposal(
     raw_tables: list[dict[str, Any]],
     feedback: str | None = None,
 ) -> dict[str, Any]:
-    fallback = build_heuristic_proposal(dataset_name, raw_tables, feedback)
     payload = {
         "dataset_name": dataset_name,
         "feedback": feedback,
@@ -515,15 +525,27 @@ def generate_proposal(
         "Favor conservative merge recommendations when ambiguous."
     )
     response = _openai_json_response(settings, system_prompt, payload)
-    if not response:
-        return fallback
+    required_keys = {
+        "summary",
+        "merged_tables",
+        "schema_draft",
+        "column_mappings",
+        "review_items",
+        "normalization_actions",
+        "normalization_rules",
+        "notes",
+    }
+    missing_keys = [key for key in required_keys if key not in response]
+    if missing_keys:
+        raise ProposalGenerationError(
+            f"OpenAI proposal response did not include required fields: {', '.join(sorted(missing_keys))}."
+        )
     response["raw_tables"] = raw_tables
-    response.setdefault("table_component_map", fallback["table_component_map"])
+    response.setdefault(
+        "table_component_map",
+        {table["table_name"]: f"component_{index + 1}" for index, table in enumerate(raw_tables)},
+    )
     response.setdefault("user_decisions", [])
-    response.setdefault("column_mappings", fallback["column_mappings"])
-    response.setdefault("normalization_actions", fallback["normalization_actions"])
-    response.setdefault("normalization_rules", fallback["normalization_rules"])
-    response.setdefault("notes", fallback["notes"])
     rebuild_proposal_views(response)
     if feedback:
         response.setdefault("notes", []).append(f"User feedback considered: {feedback}")
