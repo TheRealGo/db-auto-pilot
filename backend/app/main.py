@@ -34,7 +34,7 @@ from app.services.ingestion import (
     save_upload,
     slugify,
 )
-from app.services.proposals import generate_proposal, revise_proposal as revise_proposal_payload
+from app.services.proposals import ProposalGenerationError, generate_proposal
 from app.services.querying import QueryGenerationError, generate_query, run_query, validate_select_sql
 
 
@@ -142,7 +142,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         raw_tables = []
         for source_file in source_files:
             raw_tables.extend(file_profile(dataset_id, source_file))
-        proposal = generate_proposal(settings, dataset["name"], raw_tables)
+        try:
+            proposal = generate_proposal(settings, dataset["name"], raw_tables)
+        except ProposalGenerationError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
         record = repository.create_proposal(dataset_id, proposal)
         repository.update_dataset_status(dataset_id, "awaiting_approval")
         return record
@@ -152,15 +155,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         dataset = repository.get_dataset(dataset_id)
         if not dataset:
             raise HTTPException(status_code=404, detail="Dataset not found.")
-        latest_proposal = repository.get_latest_proposal(dataset_id)
-        if latest_proposal:
-            proposal = revise_proposal_payload(latest_proposal["proposal"], request.feedback)
-        else:
-            source_files = repository.list_source_files(dataset_id)
-            raw_tables = []
-            for source_file in source_files:
-                raw_tables.extend(file_profile(dataset_id, source_file))
+        source_files = repository.list_source_files(dataset_id)
+        raw_tables = []
+        for source_file in source_files:
+            raw_tables.extend(file_profile(dataset_id, source_file))
+        try:
             proposal = generate_proposal(settings, dataset["name"], raw_tables, feedback=request.feedback)
+        except ProposalGenerationError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
         record = repository.create_proposal(dataset_id, proposal, feedback=request.feedback)
         repository.update_dataset_status(dataset_id, "awaiting_approval")
         return record

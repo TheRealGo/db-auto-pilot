@@ -12,11 +12,139 @@ from app.main import create_app
 from app.services.proposals import make_json_safe
 
 
+def stub_proposal(raw_tables: list[dict[str, object]], feedback: str | None = None) -> dict[str, object]:
+    note = "stubbed llm proposal"
+    if feedback:
+        note = f"{note}: {feedback}"
+    first_table = raw_tables[0]
+    first_column = first_table["columns"][0]
+    return {
+        "dataset_name": "stubbed",
+        "summary": note,
+        "raw_tables": raw_tables,
+        "merged_tables": [
+            {
+                "table_name": "merged_1",
+                "display_name": "Merged Table 1",
+                "source_tables": [table["table_name"] for table in raw_tables],
+                "columns": [
+                    {
+                        "name": first_column["db_name"],
+                        "logical_type": first_column["logical_type"],
+                        "source_columns": [
+                            {
+                                "source_table": table["table_name"],
+                                "source_column": table["columns"][0]["db_name"],
+                                "display_name": table["columns"][0]["original_name"],
+                            }
+                            for table in raw_tables
+                        ],
+                        "notes": note,
+                        "status": "merge",
+                    }
+                ],
+            }
+        ],
+        "schema_draft": [
+            {
+                "component_id": "component_1",
+                "display_name": "Merged Table 1",
+                "source_tables": [table["table_name"] for table in raw_tables],
+                "columns": [
+                    {
+                        "name": first_column["db_name"],
+                        "logical_type": first_column["logical_type"],
+                        "status": "merge",
+                        "source_count": len(raw_tables),
+                        "rationale": note,
+                    }
+                ],
+            }
+        ],
+        "column_mappings": [
+            {
+                "component_id": "component_1",
+                "canonical_name": first_column["db_name"],
+                "logical_type": first_column["logical_type"],
+                "matches": [
+                    {
+                        "source_table": table["table_name"],
+                        "source_column": table["columns"][0]["db_name"],
+                        "display_name": table["columns"][0]["original_name"],
+                    }
+                    for table in raw_tables
+                ],
+                "rationale": note,
+                "confidence": 0.95,
+                "merge_recommended": True,
+                "decision": "merge",
+                "review_status": "ready",
+            }
+        ],
+        "review_items": (
+            [
+                {
+                    "type": "keep_separate",
+                    "canonical_name": first_column["db_name"],
+                    "component_id": "component_1",
+                    "message": feedback,
+                    "matches": [
+                        {
+                            "source_table": table["table_name"],
+                            "source_column": table["columns"][0]["db_name"],
+                            "display_name": table["columns"][0]["original_name"],
+                        }
+                        for table in raw_tables
+                    ],
+                }
+            ]
+            if feedback
+            else []
+        ),
+        "normalization_actions": [
+            {
+                "table_name": table["table_name"],
+                "display_name": table["display_name"],
+                "source_column": column["original_name"],
+                "normalized_column": column["db_name"],
+                "actions": ["trim_whitespace", "normalize_column_name"],
+            }
+            for table in raw_tables
+            for column in table["columns"]
+        ],
+        "normalization_rules": [
+            "trim whitespace from text cells",
+            "normalize column names to snake_case for DB columns",
+        ],
+        "notes": [note],
+        "user_decisions": (
+            [
+                {
+                    "canonical_name": first_column["db_name"],
+                    "source_columns": [
+                        {
+                            "source_table": table["table_name"],
+                            "source_column": table["columns"][0]["db_name"],
+                        }
+                        for table in raw_tables
+                    ],
+                    "decision": "keep_separate",
+                    "reason": feedback,
+                }
+            ]
+            if feedback
+            else []
+        ),
+        "table_component_map": {table["table_name"]: "component_1" for table in raw_tables},
+    }
+
+
 def test_dataset_flow(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("DB_AUTO_PILOT_DATA_DIR", str(tmp_path / "data"))
     get_settings.cache_clear()
     app = create_app(get_settings())
     client = TestClient(app)
+    monkeypatch.setattr(main_module, "generate_proposal", lambda settings, dataset_name, raw_tables, feedback=None: stub_proposal(raw_tables, feedback))
 
     sales_csv = io.BytesIO("customer_name,amount\nAlice,120\nBob,80\n".encode("utf-8"))
     jp_csv = io.BytesIO("顧客名,売上\nAlice,120\nBob,80\n".encode("utf-8"))
@@ -83,6 +211,7 @@ def test_revision_persists_user_decision(monkeypatch, tmp_path: Path) -> None:
     get_settings.cache_clear()
     app = create_app(get_settings())
     client = TestClient(app)
+    monkeypatch.setattr(main_module, "generate_proposal", lambda settings, dataset_name, raw_tables, feedback=None: stub_proposal(raw_tables, feedback))
 
     first = io.BytesIO("顧客名,売上\nAlice,120\n".encode("utf-8"))
     second = io.BytesIO("customer_name,amount\nAlice,120\n".encode("utf-8"))
@@ -129,6 +258,7 @@ def test_query_requires_llm(monkeypatch, tmp_path: Path) -> None:
     get_settings.cache_clear()
     app = create_app(get_settings())
     client = TestClient(app)
+    monkeypatch.setattr(main_module, "generate_proposal", lambda settings, dataset_name, raw_tables, feedback=None: stub_proposal(raw_tables, feedback))
 
     csv = io.BytesIO("department,amount\nSales,120\nSales,80\nHR,50\n".encode("utf-8"))
     create = client.post("/datasets", files=[("files", ("sales.csv", csv, "text/csv"))])
@@ -146,6 +276,24 @@ def test_query_requires_llm(monkeypatch, tmp_path: Path) -> None:
     )
     assert query.status_code == 502
     assert query.json()["detail"] == "OpenAI API key is not configured."
+
+
+def test_proposal_requires_llm(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("DB_AUTO_PILOT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_ENDPOINT", raising=False)
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+    get_settings.cache_clear()
+    app = create_app(get_settings())
+    client = TestClient(app)
+
+    csv = io.BytesIO("department,amount\nSales,120\n".encode("utf-8"))
+    create = client.post("/datasets", files=[("files", ("sales.csv", csv, "text/csv"))])
+    dataset_id = create.json()["dataset"]["id"]
+
+    proposal = client.post(f"/datasets/{dataset_id}/proposal")
+    assert proposal.status_code == 502
+    assert proposal.json()["detail"] == "OpenAI API key is not configured."
 
 
 def test_app_settings_roundtrip(monkeypatch, tmp_path: Path) -> None:
@@ -198,6 +346,7 @@ def test_generate_proposal_accepts_excel_datetime_columns(monkeypatch, tmp_path:
     get_settings.cache_clear()
     app = create_app(get_settings())
     client = TestClient(app)
+    monkeypatch.setattr(main_module, "generate_proposal", lambda settings, dataset_name, raw_tables, feedback=None: stub_proposal(raw_tables, feedback))
 
     dataframe = pd.DataFrame(
         {
