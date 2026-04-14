@@ -75,9 +75,9 @@ def openai_sql(settings: Settings, question: str, tables: list[dict[str, Any]]) 
         "response_shape": {"sql": "string", "explanation": "string"},
     }
     try:
-        response = client.responses.create(
+        response = client.chat.completions.create(
             model=openai_settings.model,
-            input=[
+            messages=[
                 {
                     "role": "system",
                     "content": (
@@ -93,7 +93,8 @@ def openai_sql(settings: Settings, question: str, tables: list[dict[str, Any]]) 
     except Exception as exc:  # pragma: no cover
         raise QueryGenerationError(f"Unexpected OpenAI query error: {exc}") from exc
 
-    text = getattr(response, "output_text", "").strip()
+    message = response.choices[0].message if response.choices else None
+    text = (message.content or "").strip() if message else ""
     if not text:
         raise QueryGenerationError("OpenAI returned an empty response.")
     try:
