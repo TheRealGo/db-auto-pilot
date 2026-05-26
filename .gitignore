@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+backend/.venv/
+
+# Local data and generated databases
+data/*.db
+backend/data/*.db
+data/*.db.bak
+backend/data/*.db.bak
+data/uploads/
+backend/data/uploads/
+backups/
+release-evidence*.json
+
+# Frontend dependencies and build output
+frontend/node_modules/
+frontend/dist/
+
+# Desktop/build artifacts
+.build/
+frontend/src-tauri/target/
+
+# Local environment/tooling
+.env
+.direnv/
+.DS_Store

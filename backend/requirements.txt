@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+pydantic
+pydantic-settings
+pandas
+openpyxl
+python-multipart
+openai
